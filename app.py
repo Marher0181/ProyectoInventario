@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask  import Flask, render_template, request, redirect, url_for, session, flash
 from models import db, Categorias, Roles, Usuarios, Proveedores, Productos, MovimientosInventario, Ventas, Productos, DetalleVentas
 from config import Config
 from datetime import datetime
 from sqlalchemy import text
+import bcrypt
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -13,8 +14,12 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
+        #password = password.encode('utf-8')
+        #sal = bcrypt.gensalt()
+        #hashed_password = bcrypt.hashpw(password, sal)
+        #password = hashed_password
         sql = db.text("EXEC sp_Login :email, :password")
-
+        print(password)
         try:
             result = db.session.execute(sql, {'email': email, 'password': password})
             rows = result.fetchall()
@@ -49,13 +54,15 @@ def gestionar_usuarios():
         if idRol == 1:
             action = request.form.get('action')
 
-            # Agregar un usuario
             if action == 'Agregar':
                 nombre = request.form.get('nombre')
                 email = request.form.get('email')
                 password = request.form.get('password')
                 idRol = request.form.get('idRol')
-
+                password = password.encode('utf-8')
+                sal = bcrypt.gensalt()
+                hashed_password = bcrypt.hashpw(password, sal)
+                password = hashed_password
                 sql = text("EXEC sp_AgregarUsuario :nombre, :email, :password, :idRol")
                 try:
                     db.session.execute(sql, {'nombre': nombre, 'email': email, 'password': password, 'idRol': idRol})
@@ -65,7 +72,6 @@ def gestionar_usuarios():
                     db.session.rollback()
                     flash(f"Error al agregar usuario: {e}")
 
-            # Modificar un usuario
             elif action == 'Modificar':
                 idUsuario = request.form.get('idUsuario')
                 nombre = request.form.get('nombre')
@@ -94,10 +100,10 @@ def gestionar_usuarios():
                 db.session.rollback()
                 flash(f"Error al eliminar usuario: {e}")
 
-    # Listar usuarios
     usuarios = db.session.execute(text("SELECT * FROM Usuarios")).fetchall()
+    roles = db.session.execute(text("SELECT * FROM Roles")).fetchall()
 
-    return render_template('gestionar_usuarios.html', usuarios=usuarios, idRol=idRol)
+    return render_template('gestionar_usuarios.html', usuarios=usuarios, idRol=idRol, roles=roles)
 
 @app.route('/ventas', methods=['GET', 'POST'])
 def gestionar_ventas():
@@ -112,9 +118,9 @@ def gestionar_ventas():
     if query:
         productos = Productos.query.filter(
             Productos.nombre.ilike(f'%{query}%') | Productos.descripcion.ilike(f'%{query}%')
-        ).order_by(Productos.nombre).paginate(page=page, per_page=per_page)  # Agregamos ORDER BY
+        ).order_by(Productos.nombre).paginate(page=page, per_page=per_page) 
     else:
-        productos = Productos.query.order_by(Productos.nombre).paginate(page=page, per_page=per_page)  # Agregamos ORDER BY
+        productos = Productos.query.order_by(Productos.nombre).paginate(page=page, per_page=per_page) 
 
     usuario = session['usuarioSesion']
 
@@ -128,7 +134,7 @@ def gestionar_ventas():
             metodoPago=request.form.get('metodoPago'),
             cliente=request.form.get('cliente'),
             observaciones=request.form.get('observaciones'),
-            totalVenta=0  # Inicialmente 0, se actualizará más tarde
+            totalVenta=0
         )
         db.session.add(venta)
         db.session.commit()
@@ -144,16 +150,10 @@ def gestionar_ventas():
             subtotal = producto.precioVenta * cantidad
             total_venta += subtotal
 
-            detalle = DetalleVentas(
-                idVenta=venta.idVenta,
-                idProducto=producto.idProducto,
-                cantidad=cantidad,
-                precioUnitario=producto.precioVenta,
-                subtotal=subtotal
-            )
-            db.session.add(detalle)
-
-            producto.cantidadEnStock -= cantidad
+            sql = text("INSERT INTO DetalleVentas VALUES (:idVenta, :idProducto, :cantidad, :precioUnitario, :subtotal)")
+            db.session.execute(sql, {'idVenta': venta.idVenta, 'idProducto': idProducto, 'cantidad': cantidad, 'precioUnitario': producto.precioVenta, 'subtotal': subtotal})
+            db.session.commit()
+            flash("Usuario modificado correctamente.")
 
         venta.totalVenta = total_venta
         db.session.commit()
